@@ -1,10 +1,10 @@
 CC=clang
 CFLAGS=-Wall -Wextra -pedantic -std=c99 -ggdb
 
-http-server: http-server.c
+http_server: http_server.c
 	${CC} ${CFLAGS} $^ -o $@
 
 .PHONY: clean
 
 clean:
-	rm -f http-server
+	rm -f http_server

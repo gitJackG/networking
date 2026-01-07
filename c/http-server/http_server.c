@@ -6,14 +6,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
-const char* CRLF = "\r\n";
-const char* SP = " ";
+#include "string_ops.h"
 
-typedef struct {
-    const char* data;
-    size_t len;
-} string;
+#define CRLF "\r\n"
+#define SP " "
 
 typedef struct {
     string method;
@@ -21,81 +19,28 @@ typedef struct {
     string version;
 } http_request_line;
 
-typedef enum {
+typedef enum http_status {
     HTTP_RES_OK = 200,
     HTTP_RES_BAD_REQUEST = 400,
+    HTTP_RES_NOT_FOUND = 404,
     HTTP_RES_INTERNAL_SERVER_ERR = 500
-} http_result;
+} http_status;
 
-typedef struct {
-    const char* start;
-    size_t len;
-} string_view;
-
-typedef struct {
-    string_view* splits;
-    size_t count;
-    size_t capacity;
-} string_splits;
-
-bool string_equal(string* l, string* r) {
-    return l->len == r->len && memcmp(l->data, r->data, l->len) == 0;
-}
-
-string string_from_cstr(const char* str) {
-    string s;
-    s.len = strlen(str);
-    s.data = str;
-    return s;
-}
-
-static string_splits split_string(const char* str, size_t len, const char* split_by) {
-    string_splits result;
-    const char* start = str;
-    size_t result_i = 0;
-    size_t split_by_len = strlen(split_by);
-
-    result.capacity = 8;
-    result.splits = calloc(sizeof(string_view), result.capacity);
-    result.count = 0;
-
-    for (size_t i = 0; i < len; ++i) {
-        if (i + split_by_len < len && memcmp(&str[i], split_by, split_by_len) == 0) {
-            result.splits[result_i].start = start;
-            result.splits[result_i].len = &str[i] - start;
-            result.count += 1;
-            result_i += 1;
-            start = &str[i + split_by_len];
-            i += split_by_len;
-
-            if (result.count == result.capacity) {
-                result.capacity *= 2;
-                string_view* temp = realloc(result.splits, sizeof(string_view) * result.capacity);
-                if (temp) {
-                    result.splits = temp;
-                } else {
-                    perror("realloc()");
-                    abort();
-                }
-            }
-        }
-    }
-    size_t last_len = &str[len] - start;
-    if (last_len > 0) {
-        result.splits[result_i].start = start;
-        result.splits[result_i].len = last_len;
-        result.count += 1;
-    }
-
-    return result;
-}
-
-static void free_splits(string_splits* splits) {
-    if (splits) {
-        free(splits->splits);
-        splits->splits = NULL;
+const char* http_status_to_string(http_status status) {
+    switch (status) {
+    case HTTP_RES_OK:
+        return "OK";
+    case HTTP_RES_BAD_REQUEST:
+        return "Bad request";
+    case HTTP_RES_INTERNAL_SERVER_ERR:
+        return "Internal server error";
+    case HTTP_RES_NOT_FOUND:
+        return "Not found";
+    default:
+        return "Unknown";
     }
 }
+
 
 http_request_line http_request_line_init(void) {
     http_request_line line;
@@ -103,7 +48,7 @@ http_request_line http_request_line_init(void) {
     return line;
 }
 
-http_result parse_request_line(http_request_line* request_line, const char* buf, size_t len){
+http_status parse_request_line(http_request_line* request_line, const char* buf, size_t len){
     if (!buf || !request_line) {
         return HTTP_RES_INTERNAL_SERVER_ERR;
     }
@@ -126,11 +71,40 @@ http_result parse_request_line(http_request_line* request_line, const char* buf,
     return HTTP_RES_OK;
 }
 
+string generate_http_response(char* buf, size_t buf_len, http_status status, size_t body_len) {
+    string response;
+    response.len = 0;
+    memset(buf, 0, buf_len);
+
+    response.len += sprintf(buf, "%s %d %s" CRLF, "HTTP/1.0", status, http_status_to_string(status));
+    response.len += sprintf(buf + response.len, "Content-Length: %zu" CRLF, body_len);
+    response.len += sprintf(buf + response.len, CRLF);
+    response.data = buf;
+
+    return response;
+}
+
+bool send_http_response(int socket, string header, string body) {
+    ssize_t n = send(socket, header.data, header.len, MSG_MORE);
+
+    if (n < 0) {
+        perror("send()");
+        return false;
+    } else if (n == 0) {
+        fprintf(stderr, "send() returned 0\n");
+        return false;
+    }
+
+    n = send(socket, body.data, body.len, 0);
+    return true;
+}
+
 int handle_client(int client_socket) {
 	ssize_t n = 0;
 	char buf[1024];
-	const char* hello = "HTTP/1.0 200 OK\r\n\r\nHello World!";
-	const char* bye = "HTTP/1.0 200 OK\r\n\r\nBye World!";
+	string hello_body = string_from_cstr("<h1>Hello World!</h1>");
+	string bye_body = string_from_cstr("<h1>Bye World!</h1>");
+    string not_found = string_from_cstr("<p>Error 404: not found</p>");
 
 	for (;;) {
 		memset(buf, 0, sizeof(buf));
@@ -155,7 +129,8 @@ int handle_client(int client_socket) {
         }
 
 		http_request_line request_line = http_request_line_init();
-		http_result result = parse_request_line(&request_line, lines.splits[0].start, lines.splits[1].len);
+		http_status result = parse_request_line(&request_line, lines.splits[0].start, lines.splits[1].len);
+        free_splits(&lines);
         if (result != HTTP_RES_OK) {
             printf("failed to parse request line\n");
             return -1;
@@ -164,15 +139,19 @@ int handle_client(int client_socket) {
         string route_hello = string_from_cstr("/hello");
         string route_bye = string_from_cstr("/bye");
         if (string_equal(&request_line.uri, &route_hello)) {
-            (void)write(client_socket, hello, strlen(hello));
+            send_http_response(client_socket,
+            generate_http_response(buf, sizeof(buf), HTTP_RES_OK, hello_body.len),
+            hello_body);
         } else if (string_equal(&request_line.uri, &route_bye)){
-            (void)write(client_socket, bye, strlen(bye));
+            send_http_response(client_socket,
+            generate_http_response(buf, sizeof(buf), HTTP_RES_OK, bye_body.len),
+            bye_body);
         } else {
-            printf("ERROR: unknown route: \"%.*s\"\n", (int)request_line.uri.len, request_line.uri.data);
-            return -1;
+            send_http_response(client_socket,
+            generate_http_response(buf, sizeof(buf), HTTP_RES_NOT_FOUND, not_found.len),
+            not_found);
         }
 		
-        free_splits(&lines);
         close(client_socket);
         break;
 	}
@@ -181,6 +160,8 @@ int handle_client(int client_socket) {
 
 	return 0;
 }
+
+const int PORT = 9999;
 
 int main(void) {
 	int rc = 0;
@@ -205,7 +186,7 @@ int main(void) {
 	/* Ignore failure and use SO_REUSEADDR (not production ready) */
 	rc = setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
 
-    bind_addr.sin_port = htons(9999);
+    bind_addr.sin_port = htons(PORT);
     bind_addr.sin_family = AF_INET;
     bind_addr.sin_addr.s_addr = INADDR_ANY;
 
@@ -230,7 +211,7 @@ int main(void) {
 		close(tcp_socket);
 		return 1;
 	}
-	printf("listen succeeded\n");
+	printf("listening on http://localhost:%d/\n", PORT);
 
 	for (;;) {
 		printf("waiting for connections\n");
