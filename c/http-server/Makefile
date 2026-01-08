@@ -1,8 +1,8 @@
 CC=clang
-CFLAGS=-Wall -Wextra -pedantic -std=c99 -ggdb
+CFLAGS=-Wall -Wextra -pedantic -std=gnu99 -ggdb
 
-http_server: http_server.c
-	${CC} ${CFLAGS} $^ -o $@
+http_server: http_server.c string_ops.h fs.h
+	${CC} ${CFLAGS} $< -o $@
 
 .PHONY: clean
 
