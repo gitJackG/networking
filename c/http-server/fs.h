@@ -8,6 +8,7 @@
 
 typedef struct {
     bool exists;
+    size_t size;
 } fs_metadata;
 
 
@@ -15,6 +16,7 @@ fs_metadata get_fs_metadata(string filename) {
     char buf[PATH_MAX];
     struct stat st;
     fs_metadata metadata;
+    metadata.exists = false;
     if (filename.len + 1 > PATH_MAX) {
         metadata.exists = false;
         return metadata;
@@ -25,6 +27,7 @@ fs_metadata get_fs_metadata(string filename) {
         metadata.exists = false;
         return metadata;
     }
+    metadata.size = st.st_size;
     metadata.exists = true;
     return metadata;
 }
