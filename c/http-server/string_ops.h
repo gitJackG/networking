@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -10,12 +12,7 @@ typedef struct {
 } string;
 
 typedef struct {
-    const char* start;
-    size_t len;
-} string_view;
-
-typedef struct {
-    string_view* splits;
+    string* splits;
     size_t count;
     size_t capacity;
 } string_splits;
@@ -33,26 +30,26 @@ string string_from_cstr(const char* str) {
 
 static string_splits split_string(const char* str, size_t len, const char* split_by) {
     string_splits result;
-    const char* start = str;
+    const char* data = str;
     size_t result_i = 0;
     size_t split_by_len = strlen(split_by);
 
     result.capacity = 8;
-    result.splits = (string_view*)calloc(sizeof(string_view), result.capacity);
+    result.splits = (string*)calloc(sizeof(string), result.capacity);
     result.count = 0;
 
     for (size_t i = 0; i < len; ++i) {
         if (i + split_by_len < len && memcmp(&str[i], split_by, split_by_len) == 0) {
-            result.splits[result_i].start = start;
-            result.splits[result_i].len = &str[i] - start;
+            result.splits[result_i].data = data;
+            result.splits[result_i].len = &str[i] - data;
             result.count += 1;
             result_i += 1;
-            start = &str[i + split_by_len];
+            data = &str[i + split_by_len];
             i += split_by_len;
 
             if (result.count == result.capacity) {
                 result.capacity *= 2;
-                string_view* temp = (string_view*)realloc(result.splits, sizeof(string_view) * result.capacity);
+                string* temp = (string*)realloc(result.splits, sizeof(string) * result.capacity);
                 if (temp) {
                     result.splits = temp;
                 } else {
@@ -62,9 +59,9 @@ static string_splits split_string(const char* str, size_t len, const char* split
             }
         }
     }
-    size_t last_len = &str[len] - start;
+    size_t last_len = &str[len] - data;
     if (last_len > 0) {
-        result.splits[result_i].start = start;
+        result.splits[result_i].data = data;
         result.splits[result_i].len = last_len;
         result.count += 1;
     }
