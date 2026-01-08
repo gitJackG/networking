@@ -8,12 +8,16 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
 
 #include "string_ops.h"
 #include "fs.h"
 
 #define CRLF "\r\n"
 #define SP " "
+
+const string WEB_ROOT = STRING_FROM_CSTR("./www/")
 
 typedef struct {
     string method;
@@ -101,12 +105,89 @@ bool send_http_response(int socket, string header, string body) {
     return true;
 }
 
+static string not_found = STRING_FROM_CSTR("<p>Error 404: not found</p>")
+
+bool serve_http_file(int socket, string filename) {
+    char buf[64];
+    char filename_buf[PATH_MAX];
+    int in_fd = -1;
+    string header;
+    ssize_t result = 0;
+    bool return_value = true;
+    size_t sent = 0;
+    off_t sendfile_offset = 0;
+
+    memset(filename_buf, 0, sizeof(filename_buf));
+    memcpy(filename_buf, WEB_ROOT.data, WEB_ROOT.len);
+    memcpy(filename_buf + WEB_ROOT.len - 1, filename.data, filename.len);
+
+    fs_metadata file_metadata = get_fs_metadata(string_from_cstr(filename_buf));
+    if (!file_metadata.exists) {
+        (void)send_http_response(socket,
+        generate_http_response(buf, sizeof(buf), HTTP_RES_NOT_FOUND, not_found.len),
+        not_found);
+        return_value = false;
+        if (in_fd != -1) {
+            close(in_fd);
+        }
+        return return_value;
+    }
+
+    header = generate_http_response(buf, sizeof(buf), HTTP_RES_OK, file_metadata.size);
+
+    ssize_t n = send(socket, header.data, header.len, MSG_MORE);
+    if (n < 0) {
+        perror("send()");
+        return_value = false;
+        if (in_fd != -1) {
+            close(in_fd);
+        }
+        return return_value;
+    } else if (n == 0) {
+        fprintf(stderr, "send() returned 0\n");
+        return_value = false;
+        if (in_fd != -1) {
+            close(in_fd);
+        }
+        return return_value;
+    }
+
+    in_fd = open(filename_buf, O_RDONLY);
+    if (in_fd < 0) {
+        (void)send_http_response(socket,
+        generate_http_response(buf, sizeof(buf), HTTP_RES_NOT_FOUND, not_found.len),
+        not_found);
+        return_value = false;
+        if (in_fd != -1) {
+            close(in_fd);
+        }
+        return return_value;
+    }
+    while (sent < file_metadata.size) {
+        result = sendfile(socket, in_fd, &sendfile_offset, file_metadata.size);
+        if (result < 0) {
+            printf("sendfile()");
+            (void)send_http_response(socket,
+            generate_http_response(buf, sizeof(buf), HTTP_RES_NOT_FOUND, not_found.len),
+            not_found);
+            return_value = false;
+            if (in_fd != -1) {
+                close(in_fd);
+            }
+            return return_value;
+        }
+        sent += result;
+    }
+
+    if (in_fd != -1) {
+        close(in_fd);
+    }
+    return return_value;
+}
+
 int handle_client(int client_socket) {
 	ssize_t n = 0;
 	char buf[1024];
-	string hello_body = string_from_cstr("<h1>Hello World!</h1>");
-	string bye_body = string_from_cstr("<h1>Bye World!</h1>");
-    string not_found = string_from_cstr("<p>Error 404: not found</p>");
 
 	for (;;) {
 		memset(buf, 0, sizeof(buf));
@@ -138,20 +219,16 @@ int handle_client(int client_socket) {
             return -1;
         }
 
-        string route_hello = string_from_cstr("/hello");
-        string route_bye = string_from_cstr("/bye");
-        if (string_equal(&request_line.uri, &route_hello)) {
-            send_http_response(client_socket,
-            generate_http_response(buf, sizeof(buf), HTTP_RES_OK, hello_body.len),
-            hello_body);
-        } else if (string_equal(&request_line.uri, &route_bye)){
-            send_http_response(client_socket,
-            generate_http_response(buf, sizeof(buf), HTTP_RES_OK, bye_body.len),
-            bye_body);
+        string route_root = string_from_cstr("/");
+        if (string_equal(&request_line.uri, &route_root)) {
+            if (!serve_http_file(client_socket, string_from_cstr("index.html"))) {
+                return -1;
+            }
         } else {
             send_http_response(client_socket,
             generate_http_response(buf, sizeof(buf), HTTP_RES_NOT_FOUND, not_found.len),
             not_found);
+            return -1;
         }
 		
         close(client_socket);
@@ -172,10 +249,9 @@ int main(void) {
 	int client_socket = 0;
 	int enabled = true;
 
-    const char* web_root = "./www";
-    fs_metadata web_root_metadata = get_fs_metadata(string_from_cstr(web_root));
+    fs_metadata web_root_metadata = get_fs_metadata(WEB_ROOT);
     if (!web_root_metadata.exists) {
-        mkdir(web_root, S_IEXEC | S_IWRITE | S_IREAD | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+        mkdir(WEB_ROOT.data, S_IEXEC | S_IWRITE | S_IREAD | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
     }
 
     memset(&bind_addr, 0, sizeof(bind_addr));
