@@ -7,8 +7,10 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <sys/stat.h>
 
 #include "string_ops.h"
+#include "fs.h"
 
 #define CRLF "\r\n"
 #define SP " "
@@ -60,11 +62,11 @@ http_status parse_request_line(http_request_line* request_line, const char* buf,
         return HTTP_RES_BAD_REQUEST;
     }
 
-    request_line->method.data = components.splits[0].start;
+    request_line->method.data = components.splits[0].data;
     request_line->method.len = components.splits[0].len;
-    request_line->uri.data = components.splits[1].start;
+    request_line->uri.data = components.splits[1].data;
     request_line->uri.len = components.splits[1].len;
-    request_line->version.data = components.splits[2].start;
+    request_line->version.data = components.splits[2].data;
     request_line->version.len = components.splits[2].len;
 
     free_splits(&components);
@@ -129,7 +131,7 @@ int handle_client(int client_socket) {
         }
 
 		http_request_line request_line = http_request_line_init();
-		http_status result = parse_request_line(&request_line, lines.splits[0].start, lines.splits[1].len);
+		http_status result = parse_request_line(&request_line, lines.splits[0].data, lines.splits[1].len);
         free_splits(&lines);
         if (result != HTTP_RES_OK) {
             printf("failed to parse request line\n");
@@ -169,6 +171,12 @@ int main(void) {
 	int tcp_socket = 0;
 	int client_socket = 0;
 	int enabled = true;
+
+    const char* web_root = "./www";
+    fs_metadata web_root_metadata = get_fs_metadata(string_from_cstr(web_root));
+    if (!web_root_metadata.exists) {
+        mkdir(web_root, S_IEXEC | S_IWRITE | S_IREAD | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+    }
 
     memset(&bind_addr, 0, sizeof(bind_addr));
 	tcp_socket = socket(
