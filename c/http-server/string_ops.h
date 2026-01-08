@@ -21,6 +21,8 @@ bool string_equal(string* l, string* r) {
     return l->len == r->len && memcmp(l->data, r->data, l->len) == 0;
 }
 
+#define STRING_FROM_CSTR(str) (string) { .data = str, .len = sizeof(str) };
+
 string string_from_cstr(const char* str) {
     string s;
     s.len = strlen(str);
