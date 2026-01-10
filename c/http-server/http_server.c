@@ -32,7 +32,7 @@ typedef enum http_status {
     HTTP_RES_INTERNAL_SERVER_ERR = 500
 } http_status;
 
-const char* http_status_to_string(http_status status) {
+static const char* http_status_to_string(http_status status) {
     switch (status) {
     case HTTP_RES_OK:
         return "OK";
@@ -48,13 +48,13 @@ const char* http_status_to_string(http_status status) {
 }
 
 
-http_request_line http_request_line_init(void) {
+static http_request_line http_request_line_init(void) {
     http_request_line line;
     memset(&line, 0, sizeof(line));
     return line;
 }
 
-http_status parse_request_line(http_request_line* request_line, const char* buf, size_t len){
+static http_status parse_request_line(http_request_line* request_line, const char* buf, size_t len){
     if (!buf || !request_line) {
         return HTTP_RES_INTERNAL_SERVER_ERR;
     }
@@ -77,7 +77,7 @@ http_status parse_request_line(http_request_line* request_line, const char* buf,
     return HTTP_RES_OK;
 }
 
-string generate_http_response(char* buf, size_t buf_len, http_status status, size_t body_len) {
+static string generate_http_response(char* buf, size_t buf_len, http_status status, size_t body_len) {
     string response;
     response.len = 0;
     memset(buf, 0, buf_len);
@@ -90,7 +90,7 @@ string generate_http_response(char* buf, size_t buf_len, http_status status, siz
     return response;
 }
 
-bool send_http_response(int socket, string header, string body) {
+static bool send_http_response(int socket, string header, string body) {
     ssize_t n = send(socket, header.data, header.len, MSG_MORE);
 
     if (n < 0) {

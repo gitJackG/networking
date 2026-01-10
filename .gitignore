@@ -41,3 +41,6 @@
 *.dwo
 
 ./c/http-server/http_server
+./cpp/http-server/http_server
+
+.vs/
