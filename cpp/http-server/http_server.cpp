@@ -4,11 +4,12 @@
 #include <sys/socket.h>
 #include <unistd.h>  
 #include <vector> 
+#include <array> 
 
-// constexpr const char* CRLF = "\r\n";
-// constexpr const char* SP = " ";
+ constexpr const char* CRLF = "\r\n";
+ constexpr const char* SP = " ";
 
-// constexpr std::string_view WEB_ROOT = "./www";
+ constexpr std::string_view WEB_ROOT = "./www";
 
 typedef struct {
 	std::string_view method;
@@ -47,41 +48,80 @@ static http_request_line request_init(void) {
 	return request;
 }
 
-static http_status request_parse(http_request_line* request_line, char* buf, size_t len) {
-	if (!buf || !request_line) {
+static http_status request_parse(http_request_line& out, std::string_view request) {
+	size_t line_end = request.find(CRLF);
+	if (line_end == std::string_view::npos)
+	{
 		return HTTP_RES_INTERNAL_SERVER_ERR;
 	}
-w
-	request_line->method = "";
-	request_line->uri = "";
-	request_line->version = "";
+
+	std::string_view line = request.substr(0, line_end);
+
+	size_t method_line_end = line.find(SP);
+	if (method_line_end == std::string_view::npos)
+	{
+		return HTTP_RES_INTERNAL_SERVER_ERR;
+	}
+	out.method = line.substr(0, method_line_end);
+
+	size_t uri_line_end = line.find(SP, method_line_end + 1);
+	if (uri_line_end == std::string_view::npos)
+	{
+		return HTTP_RES_INTERNAL_SERVER_ERR;
+	}
+	out.uri = line.substr(method_line_end + 1, uri_line_end - (method_line_end + 1));
+
+	out.version = line.substr(uri_line_end + 1);
+
+	if (out.method.empty() ||
+		out.uri.empty() ||
+		out.version.empty())
+		return HTTP_RES_BAD_REQUEST;
 
 	return HTTP_RES_OK;
 }
 
+static bool serve_file(int client_socket, std::string_view filename)
+{
+	int in_fd = -1;
+	ssize_t n = 0;
+
+	std::string_view header = ""
+	n = send(client_socket, )
+}
+
 static int handle_client(int client_socket) {
-	size_t n = 0;
-	char buf[1024] = { 0 };
+	ssize_t n = 0;
+	std::array<char, 1024> buf;
 
 	for (;;) {
-		n = recv(client_socket, buf, sizeof(buf), 0);
+		n = recv(client_socket, buf.data(), buf.size(), 0);
 		if (n < 0) {
 			std::cerr << "recv()" << std::endl;
 		}
 
+		std::string_view request(buf.data(), n);
+
 		std::cout << "REQUEST:" << std::endl;
-		std::cout << buf << std::endl;
+		std::cout << request << std::endl;
 		std::cout << "-----" << std::endl;
 
 		http_request_line request_line = request_init();
-		http_status result = request_parse(&request_line, buf, sizeof(buf));
-
+		http_status result = request_parse(request_line, request);
 		if (result != HTTP_RES_OK) {
 			std::cout << "failed to parse request line" << std::endl;
 			return -1;
 		}
 
 		std::string_view route_root = "/";
+
+		if (request_line.uri == route_root)
+		{
+
+		}
+
+		close(client_socket);
+		break;
 	}
 	return n;
 }
