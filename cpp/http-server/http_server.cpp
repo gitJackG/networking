@@ -1,198 +1,61 @@
+#include <string>
 #include <iostream>
-#include <string_view>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>  
-#include <vector> 
-#include <array> 
+#include <unistd.h>
 
- constexpr const char* CRLF = "\r\n";
- constexpr const char* SP = " ";
-
- constexpr std::string_view WEB_ROOT = "./www";
-
-typedef struct {
-	std::string_view method;
-	std::string_view uri;
-	std::string_view version;
-} http_request_line;
-
-typedef enum http_status {
-	HTTP_RES_OK = 200,
-	HTTP_RES_BAD_REQUEST = 400,
-	HTTP_RES_NOT_FOUND = 404,
-	HTTP_RES_INTERNAL_SERVER_ERR = 500
-} http_status;
-
-static const char* http_status_to_string(http_status status) {
-	switch (status) {
-	case HTTP_RES_OK:
-		return "OK";
-	case HTTP_RES_BAD_REQUEST:
-		return "Bad request";
-	case HTTP_RES_INTERNAL_SERVER_ERR:
-		return "Internal server error";
-	case HTTP_RES_NOT_FOUND:
-		return "Not found";
-	default:
-		return "Unknown";
-	}
-}
-
-static http_request_line request_init(void) {
-	http_request_line request;
-	request.method = "";
-	request.uri = "";
-	request.version = "";
-
-	return request;
-}
-
-static http_status request_parse(http_request_line& out, std::string_view request) {
-	size_t line_end = request.find(CRLF);
-	if (line_end == std::string_view::npos)
-	{
-		return HTTP_RES_INTERNAL_SERVER_ERR;
-	}
-
-	std::string_view line = request.substr(0, line_end);
-
-	size_t method_line_end = line.find(SP);
-	if (method_line_end == std::string_view::npos)
-	{
-		return HTTP_RES_INTERNAL_SERVER_ERR;
-	}
-	out.method = line.substr(0, method_line_end);
-
-	size_t uri_line_end = line.find(SP, method_line_end + 1);
-	if (uri_line_end == std::string_view::npos)
-	{
-		return HTTP_RES_INTERNAL_SERVER_ERR;
-	}
-	out.uri = line.substr(method_line_end + 1, uri_line_end - (method_line_end + 1));
-
-	out.version = line.substr(uri_line_end + 1);
-
-	if (out.method.empty() ||
-		out.uri.empty() ||
-		out.version.empty())
-		return HTTP_RES_BAD_REQUEST;
-
-	return HTTP_RES_OK;
-}
-
-static bool serve_file(int client_socket, std::string_view filename)
+int main()
 {
-	int in_fd = -1;
-	ssize_t n = 0;
+    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0)
+    {
+        std::cerr << "socket()" << std::endl;
+        return 1;
+    }
 
-	std::string_view header = ""
-	n = send(client_socket, )
-}
+    int rc = 0;
+    int enabled = 1;
 
-static int handle_client(int client_socket) {
-	ssize_t n = 0;
-	std::array<char, 1024> buf;
+    rc = setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
+    if (rc < 0)
+    {
+        std::cerr << "setsockopt()" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
 
-	for (;;) {
-		n = recv(client_socket, buf.data(), buf.size(), 0);
-		if (n < 0) {
-			std::cerr << "recv()" << std::endl;
-		}
+    sockaddr_in serverAddress{};
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(8080);
+    serverAddress.sin_addr.s_addr = INADDR_ANY;
 
-		std::string_view request(buf.data(), n);
+    rc = bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
+    if (rc < 0)
+    {
+        std::cerr << "bind()" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
+    std::cout << "bind successful" << std::endl;
 
-		std::cout << "REQUEST:" << std::endl;
-		std::cout << request << std::endl;
-		std::cout << "-----" << std::endl;
+    rc = listen(serverSocket, SOMAXCONN);
+    if (rc < 0)
+    {
+        std::cerr << "listen()" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
+    std::cout << "listen successful" << std::endl;
 
-		http_request_line request_line = request_init();
-		http_status result = request_parse(request_line, request);
-		if (result != HTTP_RES_OK) {
-			std::cout << "failed to parse request line" << std::endl;
-			return -1;
-		}
+	for (;;)
+	{
+        std::cout << "waiting for connections..." << std::endl;
+        
+		int clientSocket = accept(serverSocket, nullptr, nullptr);
+        std::cout << "got a connection" << std::endl;
 
-		std::string_view route_root = "/";
-
-		if (request_line.uri == route_root)
-		{
-
-		}
-
-		close(client_socket);
-		break;
-	}
-	return n;
-}
-
-const int PORT = 9999;
-
-int main(void) {
-	int rc = 0;
-	struct sockaddr_in bind_addr;
-	int tcp_socket = 0;
-	int client_socket = 0;
-	int enabled = true;
-
-	/*
-	fs_metadata web_root_metadata = get_fs_metadata(WEB_ROOT);
-	if (!web_root_metadata.exists) {
-		mkdir(WEB_ROOT.data, S_IEXEC | S_IWRITE | S_IREAD | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+        // rc = handle_connection(clientSocket);
 	}
 
-	memset(&bind_addr, 0, sizeof(bind_addr));
-	*/
-
-	tcp_socket = socket(
-		AF_INET,
-		SOCK_STREAM,
-		0
-	);
-
-	if (tcp_socket < 0) {
-		std::cerr << "socket()" << std::endl;
-		return 1;
-	}
-	std::cout << "socket creation succeeded" << std::endl;
-
-	/* Ignore failure and use SO_REUSEADDR (not production ready) */
-	rc = setsockopt(tcp_socket, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
-
-	bind_addr.sin_port = htons(PORT);
-	bind_addr.sin_family = AF_INET;
-	bind_addr.sin_addr.s_addr = INADDR_ANY;
-
-	rc = bind(
-		tcp_socket,
-		(const struct sockaddr*)&bind_addr,
-		sizeof(bind_addr)
-	);
-	if (rc < 0) {
-		std::cerr << "bind()" << std::endl;
-		close(tcp_socket);
-		return 1;
-	}
-	std::cout << "bind succeeded" << std::endl;
-
-	rc = listen(
-		tcp_socket,
-		SOMAXCONN
-	);
-	if (rc < 0) {
-		std::cerr << "listen()" << std::endl;
-		close(tcp_socket);
-		return 1;
-	}
-	std::cout << "listening on http://localhost:" << PORT << "/" << std::endl;
-
-	for (;;) {
-		std::cout << "waiting for connections" << std::endl;
-		client_socket = accept(tcp_socket, NULL, NULL);
-
-		std::cout << "got a connection" << std::endl;
-		rc = handle_client(client_socket);
-	}
-
-	return 0;
+    return 0;
 }
