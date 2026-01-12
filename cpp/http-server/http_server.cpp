@@ -23,7 +23,7 @@ typedef enum http_status {
 	HTTP_RES_INTERNAL_SERVER_ERR = 500
 } http_status;
 
-const char* http_status_to_string(http_status status) {
+static const char* http_status_to_string(http_status status) {
 	switch (status) {
 	case HTTP_RES_OK:
 		return "OK";
@@ -36,6 +36,54 @@ const char* http_status_to_string(http_status status) {
 	default:
 		return "Unknown";
 	}
+}
+
+static http_request_line request_init(void) {
+	http_request_line request;
+	request.method = "";
+	request.uri = "";
+	request.version = "";
+
+	return request;
+}
+
+static http_status request_parse(http_request_line* request_line, char* buf, size_t len) {
+	if (!buf || !request_line) {
+		return HTTP_RES_INTERNAL_SERVER_ERR;
+	}
+w
+	request_line->method = "";
+	request_line->uri = "";
+	request_line->version = "";
+
+	return HTTP_RES_OK;
+}
+
+static int handle_client(int client_socket) {
+	size_t n = 0;
+	char buf[1024] = { 0 };
+
+	for (;;) {
+		n = recv(client_socket, buf, sizeof(buf), 0);
+		if (n < 0) {
+			std::cerr << "recv()" << std::endl;
+		}
+
+		std::cout << "REQUEST:" << std::endl;
+		std::cout << buf << std::endl;
+		std::cout << "-----" << std::endl;
+
+		http_request_line request_line = request_init();
+		http_status result = request_parse(&request_line, buf, sizeof(buf));
+
+		if (result != HTTP_RES_OK) {
+			std::cout << "failed to parse request line" << std::endl;
+			return -1;
+		}
+
+		std::string_view route_root = "/";
+	}
+	return n;
 }
 
 const int PORT = 9999;
@@ -103,7 +151,7 @@ int main(void) {
 		client_socket = accept(tcp_socket, NULL, NULL);
 
 		std::cout << "got a connection" << std::endl;
-		// rc = handle_client(client_socket);
+		rc = handle_client(client_socket);
 	}
 
 	return 0;
