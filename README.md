@@ -12,6 +12,7 @@ Implemented in C++.
 ## todo
 - Optimize connection creation/handling.
 - Implement header functionalitites.
+- Adress security issues.
 - Implement other mehtods functionalities (not only GET).
 - Implement in Rust?
 
