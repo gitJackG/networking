@@ -4,11 +4,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sstream>
+#include <filesystem>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
 
 #define CRLF "\r\n"
 #define SP " "
 
-static std::string not_found = "<p>Error 404: not found</p>";
+static const std::string NOT_FOUND_BODY = "<p>Error 404: not found</p>";
+static const std::string WEB_ROOT = "./www/";
 
 typedef struct
 {
@@ -31,7 +36,7 @@ int handle_request(int socket);
 http_status_code parse_request(const std::string& request, http_request_line& request_line);
 std::string generate_response_header(http_status_code status, size_t file_length);
 size_t send_response_header(int socket, const std::string& response_header, const std::string& response_header_body);
-size_t serve_file(int socket, std::string& filename);
+size_t serve_file(int socket, const std::string& filename);
 
 int main()
 {
@@ -149,7 +154,7 @@ int handle_connection(int socket)
             }
         } else
         {
-            rc = send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, not_found.size()), not_found);
+            rc = send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
             if (rc < 0)
             {
                 std::cout << "send response header failed" << std::endl;
@@ -233,7 +238,83 @@ size_t send_response_header(int socket, const std::string& response_header, cons
     return 0;
 }
 
-size_t serve_file(int socket, std::string& filename)
+size_t serve_file(int socket, const std::string& filename)
 {
+    int in_fd = -1;
+    std::filesystem::path file_path;
+    std::string header;
+    struct stat st;
+    size_t sent = 0;
+    off_t sendfile_offset = 0;
+    ssize_t result = 0;
+
+    std::ostringstream temp_path;
+    temp_path << WEB_ROOT << filename;
+    file_path = temp_path.str();
+
+    std::cout << temp_path.str() << std::endl;
+
+    if (stat(file_path.c_str(), &st) != 0)
+    {
+        send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
+        std::cout << "file dosen't exist" << std::endl;
+        if (in_fd != -1)
+        {
+            close(in_fd);
+        }
+        return -1;
+    }
+
+    size_t file_size = std::filesystem::file_size(file_path);
+
+    header = generate_response_header(HTTP_RES_OK, file_size);
+    ssize_t rc = send(socket, header.data(), header.size(), MSG_MORE);
+    if (rc < 0)
+    {
+        std::cerr << "send()" << std::endl;
+        if (in_fd != -1)
+        {
+            close(in_fd);
+        }
+        return -1;
+    } else if (rc == 0)
+    {
+        std::cerr << "send() returned 0" << std::endl;
+        if (in_fd != -1)
+        {
+            close(in_fd);
+        }
+        return -1;
+    }
+
+    in_fd = open(file_path.c_str(), O_RDONLY);
+    if (in_fd < 0)
+    {
+        send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
+        if (in_fd != -1)
+        {
+            close(in_fd);
+        }
+        return -1;
+    }
+
+    while (sent < file_size) {
+        result = sendfile(socket, in_fd, &sendfile_offset, file_size);
+        if (result < 0) {
+            std::cerr << "sendfile()" << std::endl;
+            send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
+            if (in_fd != -1)
+            {
+                close(in_fd);
+            }
+            return -1;
+        }
+        sent += result;
+    }
+
+    if (in_fd != -1) {
+        close(in_fd);
+    }
+
     return 0;
 }
