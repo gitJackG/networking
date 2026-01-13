@@ -26,7 +26,9 @@ typedef enum
 {
     HTTP_RES_OK = 200,
     HTTP_RES_BAD_REQUEST = 400,
+    HTTP_RES_FORBIDEN = 403,
     HTTP_RES_NOT_FOUND = 404,
+    HTTP_RES_BAD_METHOD = 405,
     HTTP_RES_INTERNAL_SERVER_ERR = 500,
 } http_status_code;
 
@@ -105,10 +107,14 @@ std::string http_status_to_string(http_status_code status)
             return "OK";
         case HTTP_RES_BAD_REQUEST:
             return "Bad request";
-        case HTTP_RES_INTERNAL_SERVER_ERR:
-            return "Internal server error";
+        case HTTP_RES_FORBIDEN:
+            return "Forbiden";
+        case HTTP_RES_BAD_METHOD:
+            return "Method not allowed";
         case HTTP_RES_NOT_FOUND:
             return "Not found";
+        case HTTP_RES_INTERNAL_SERVER_ERR:
+            return "Internal server error";
         default:
             return "Unknown";
     }
@@ -116,19 +122,21 @@ std::string http_status_to_string(http_status_code status)
 
 int handle_connection(int socket)
 {
-    char request_buffer[1024] = {0};
-    ssize_t rc = 0;
-
     for (;;)
     {
-        rc = recv(socket, request_buffer, sizeof(request_buffer), 0);
+        char request_buffer[1024] = {0};
+        ssize_t rc = 0;
+
+        rc = recv(socket, request_buffer, sizeof(request_buffer) - 1, 0);
         if (rc < 0)
         {
             std::cerr << "recv()" << std::endl;
-            close(socket);
-            return -1;
+            break;
+        } else if (rc == 0)
+        {
+            std::cout << "client closed connection" << std::endl;
+            break;
         }
-        request_buffer[rc] = '\0';
 
         http_request_line request_line;
         request_line.method = "";
@@ -139,8 +147,10 @@ int handle_connection(int socket)
         http_status_code status = parse_request(request, request_line);
         if (status != HTTP_RES_OK)
         {
-            return -1;
+            break;
         }
+
+        std::cout << "REQUEST: " << request_line.uri << std::endl;
 
         std::string route_root = "/";
         std::string route_fn = "index.html";
@@ -150,7 +160,7 @@ int handle_connection(int socket)
             if (rc < 0)
             {
                 std::cout << "serve file failed" << std::endl;
-                return -1;
+                break;
             }
         } else
         {
@@ -158,12 +168,12 @@ int handle_connection(int socket)
             if (rc < 0)
             {
                 std::cout << "serve file failed" << std::endl;
-                return -1;
+                break;
             }
         }
-        close(socket);
-        break;
     }
+
+    close(socket);
 
     return 0;
 }
@@ -198,13 +208,28 @@ http_status_code parse_request(const std::string& request, http_request_line& re
     request_line.uri = line.substr(method_end + 1, uri_end - (method_end + 1));
     request_line.version = line.substr(uri_end + 1);
 
+    std::ostringstream temp_path;
+    temp_path << WEB_ROOT << request_line.uri;
+    std::filesystem::path path = temp_path.str();
+
+    std::cout << request_line.method << std::endl;
+    if (path.string().find(WEB_ROOT) != 0)
+    {
+        std::cout << "forbiden" << std::endl;
+        return HTTP_RES_FORBIDEN;
+    } else if (request_line.method != "GET" && request_line.method != "POST" && request_line.method != "PUT")
+    {
+        std::cout << "method not allowed" << std::endl;
+        return HTTP_RES_BAD_METHOD;
+    }
+
     return HTTP_RES_OK;
 }
 
 std::string generate_response_header(http_status_code status, size_t file_length)
 {
     std::ostringstream response_header;
-    response_header << "HTTP/1.1"
+    response_header << "HTTP/1.0"
                     << SP
                     << status
                     << SP
@@ -251,8 +276,6 @@ size_t serve_file(int socket, const std::string& filename)
     temp_path << WEB_ROOT << filename;
     file_path = temp_path.str();
 
-    std::cout << temp_path.str() << std::endl;
-
     if (stat(file_path.c_str(), &st) != 0)
     {
         send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
@@ -265,7 +288,6 @@ size_t serve_file(int socket, const std::string& filename)
     }
 
     size_t file_size = std::filesystem::file_size(file_path);
-
     header = generate_response_header(HTTP_RES_OK, file_size);
     ssize_t rc = send(socket, header.data(), header.size(), MSG_MORE);
     if (rc < 0)
@@ -298,7 +320,8 @@ size_t serve_file(int socket, const std::string& filename)
     }
 
     while (sent < file_size) {
-        result = sendfile(socket, in_fd, &sendfile_offset, file_size);
+        size_t remaining = file_size - sent;
+        result = sendfile(socket, in_fd, &sendfile_offset, remaining);
         if (result < 0) {
             std::cerr << "sendfile()" << std::endl;
             send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
