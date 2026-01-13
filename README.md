@@ -1,7 +1,7 @@
 # networking
 Project to dive deep into robust networking.
-Implemented in C.
-Implemented in C++.
+Implemented HTTP/1.0 in C.
+Implemented HTTP/1.0 in C++.
 
 ## features
 - Receives and parses http requests.
