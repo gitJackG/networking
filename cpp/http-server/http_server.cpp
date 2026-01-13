@@ -154,13 +154,12 @@ int handle_connection(int socket)
             }
         } else
         {
-            rc = send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, NOT_FOUND_BODY.size()), NOT_FOUND_BODY);
+            rc = serve_file(socket, request_line.uri);
             if (rc < 0)
             {
-                std::cout << "send response header failed" << std::endl;
+                std::cout << "serve file failed" << std::endl;
                 return -1;
             }
-            return -1;
         }
         close(socket);
         break;
