@@ -3,9 +3,12 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sstream>
 
 #define CRLF "\r\n"
 #define SP " "
+
+static std::string not_found = "<p>Error 404: not found</p>";
 
 typedef struct
 {
@@ -22,11 +25,13 @@ typedef enum
     HTTP_RES_INTERNAL_SERVER_ERR = 500,
 } http_status_code;
 
+std::string http_status_to_string(http_status_code status);
 int handle_connection(int socket);
 int handle_request(int socket);
 http_status_code parse_request(const std::string& request, http_request_line& request_line);
-std::string generate_response_header(std::string& request);
-int handle_response(int socket, std::string& response_header);
+std::string generate_response_header(http_status_code status, size_t file_length);
+size_t send_response_header(int socket, const std::string& response_header, const std::string& response_header_body);
+size_t serve_file(int socket, std::string& filename);
 
 int main()
 {
@@ -88,30 +93,72 @@ int main()
     return 0;
 }
 
+std::string http_status_to_string(http_status_code status)
+{
+    switch (status) {
+        case HTTP_RES_OK:
+            return "OK";
+        case HTTP_RES_BAD_REQUEST:
+            return "Bad request";
+        case HTTP_RES_INTERNAL_SERVER_ERR:
+            return "Internal server error";
+        case HTTP_RES_NOT_FOUND:
+            return "Not found";
+        default:
+            return "Unknown";
+    }
+}
+
 int handle_connection(int socket)
 {
     char request_buffer[1024] = {0};
     ssize_t rc = 0;
 
-    rc = recv(socket, request_buffer, sizeof(request_buffer), 0);
-    if (rc < 0)
+    for (;;)
     {
-        std::cerr << "recv()" << std::endl;
+        rc = recv(socket, request_buffer, sizeof(request_buffer), 0);
+        if (rc < 0)
+        {
+            std::cerr << "recv()" << std::endl;
+            close(socket);
+            return -1;
+        }
+        request_buffer[rc] = '\0';
+
+        http_request_line request_line;
+        request_line.method = "";
+        request_line.uri = "";
+        request_line.version = "";
+
+        std::string request(request_buffer);
+        http_status_code status = parse_request(request, request_line);
+        if (status != HTTP_RES_OK)
+        {
+            return -1;
+        }
+
+        std::string route_root = "/";
+        std::string route_fn = "index.html";
+        if (route_root == request_line.uri)
+        {
+            rc = serve_file(socket, route_fn);
+            if (rc < 0)
+            {
+                std::cout << "serve file failed" << std::endl;
+                return -1;
+            }
+        } else
+        {
+            rc = send_response_header(socket, generate_response_header(HTTP_RES_NOT_FOUND, not_found.size()), not_found);
+            if (rc < 0)
+            {
+                std::cout << "send response header failed" << std::endl;
+                return -1;
+            }
+            return -1;
+        }
         close(socket);
-        return -1;
-    }
-    request_buffer[rc] = '\0';
-
-    http_request_line request_line;
-    request_line.method = "";
-    request_line.uri = "";
-    request_line.version = "";
-
-    std::string request(request_buffer);
-    http_status_code status = parse_request(request, request_line);
-    if (status != HTTP_RES_OK)
-    {
-        return -1;
+        break;
     }
 
     return 0;
@@ -148,4 +195,45 @@ http_status_code parse_request(const std::string& request, http_request_line& re
     request_line.version = line.substr(uri_end + 1);
 
     return HTTP_RES_OK;
+}
+
+std::string generate_response_header(http_status_code status, size_t file_length)
+{
+    std::ostringstream response_header;
+    response_header << "HTTP/1.1"
+                    << SP
+                    << status
+                    << SP
+                    << http_status_to_string(status)
+                    << CRLF
+                    << "Content-Length: "
+                    << file_length
+                    << CRLF
+                    << CRLF;
+
+    return response_header.str();
+
+}
+
+size_t send_response_header(int socket, const std::string& response_header, const std::string& response_header_body)
+{
+    size_t rc = send(socket, response_header.data(), response_header.size(), MSG_MORE);
+    if (rc < 0)
+    {
+        std::cerr << "send()" << std::endl;
+        return -1;
+    }
+
+    rc = send(socket, response_header_body.data(), response_header_body.size(), 0);
+    if (rc < 0)
+    {
+        std::cerr << "send()" << std::endl;
+        return -1;
+    }
+    return 0;
+}
+
+size_t serve_file(int socket, std::string& filename)
+{
+    return 0;
 }
